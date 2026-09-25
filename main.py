@@ -1,6 +1,6 @@
 # main.py
 from fastapi import FastAPI, Query
-from api_listener import taobao_api
+from api import taobao_api
 import json
 
 app = FastAPI()
