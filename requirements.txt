@@ -1,0 +1,4 @@
+fastapi~=0.124.4
+uvicorn
+
+playwright~=1.44.0

@@ -1,16 +1,26 @@
-# 这是一个示例 Python 脚本。
+# main.py
+from fastapi import FastAPI, Query
+from api import taobao_api
+import json
 
-# 按 Shift+F10 执行或将其替换为您的代码。
-# 按 双击 Shift 在所有地方搜索类、文件、工具窗口、操作和设置。
-
-
-def print_hi(name):
-    # 在下面的代码行中使用断点来调试脚本。
-    print(f'Hi, {name}')  # 按 Ctrl+F8 切换断点。
+app = FastAPI()
 
 
-# 按装订区域中的绿色按钮以运行脚本。
-if __name__ == '__main__':
-    print_hi('PyCharm')
+@app.get("/")
+def read_root():
+    return {"message": "Hello from Vercel!"}
 
-# 访问 https://www.jetbrains.com/help/pycharm/ 获取 PyCharm 帮助
+
+@app.get("/items/{item_id}")
+def read_item(item_id: int):
+    return {"item_id": item_id}
+
+
+@app.get("/taobao_api/items")
+def fetch_taobao_items(
+    page_num: int = Query(default=1, ge=1, description="页码，从1开始"),
+    page_size: int = Query(default=25, ge=1, le=25, description="每页数量，最大25")
+):
+    # 此时 page_num 和 page_size 已经是 int 类型，且经过校验
+    data = taobao_api.get_data(page_num, page_size)
+    return data
