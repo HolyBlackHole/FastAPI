@@ -5,13 +5,17 @@ import re
 import time
 from datetime import datetime
 
-
 headers = {
     "referer": "https://www.taobao.com/",
     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36"
 }
 
-cookies = {
+# 初始化requests会话，自动管理Cookie持久化
+session = requests.Session()
+session.headers.update(headers)
+
+# 保留原有基础Cookie，令牌相关字段后续会自动更新
+base_cookies = {
     "cna": "JgeHItTEvQ4BASQIgkDE9RDx",
     "thw": "xx",
     "tracknick": "allureloveover",
@@ -50,11 +54,37 @@ cookies = {
     "havana_sdkSilent": "1790331487423",
     "mtop_partitioned_detect": "1",
     "_3dtid": "OkKpyTfSQzlyU+pAFws1Ue1K4Ms5O8v0yuDfKpfBMnTRkHU/W7AP0t1Iib8lFM/I",
-    "_m_h5_tk": "8016fd576977b2d483e40a2c540ea9cf_1790334363556",
-    "_m_h5_tk_enc": "e5f290196dd3412c5357999bd7867169",
     "tfstk": "hYlkkTxv2FltiEpvsGBTRPTxxKdO2w0s7kCRL7ocYVu_L6p7wJVn0oh824FzN4NIICPsin328ysws81264g5uajeWxkdQKSY795EY8r40PZ4z_yFUEA48o5z8_zF0E4Q0kPUL_zV0yzlYkrPTE04cyPUYDPeoSrb8WrEYW70m4A0C600MsE919CFTbRQE-d_m65Eix2ub1ED2aP4P-uQKX_CtY0rCDaZ4g-TF2kmmzVHMTPZovoglHzAL9jsl2hcWCHJfqnq0xWH4hdq4q3SKsQXXFEo77m5MateFmFj_v_khnlIkq0EagYSg3G0L0ehunRI1u0tQfRGq3xY5VL0Xym5PVZVNKcyoEXtR8zb5lLDo96QUra0XEYcBXwzlPZO.",
     "isg": "BDMz7vSMXWxLwRFclAJNxhfswjddaMcqDaYT-uXQtdKJ5FOGbTv8eJdynhQKxB8i"
 }
+session.cookies.update(base_cookies)
+
+
+def auto_update_token():
+    """自动获取/刷新_m_h5_tk令牌，无需手动维护"""
+    # 先发起一次空请求触发服务端分配新令牌
+    init_url = "https://h5api.m.taobao.com/h5/mtop.relationrecommend.wirelessrecommend.recommend/2.0/"
+    init_params = {
+        "jsv": "2.7.2",
+        "appKey": "12574478",
+        "t": f"{int(time.time() * 1000)}",
+        "v": "2.0",
+        "timeout": "3000",
+        "dataType": "jsonp",
+        "callback": "mtopjsonppcrecommend_init",
+        "data": json.dumps({"appId": "30986", "params": "{}"}, separators=(',', ':'))
+    }
+    resp = session.get(init_url, params=init_params, allow_redirects=False)
+
+    # 从响应头Set-Cookie中提取新令牌
+    new_token = resp.cookies.get("_m_h5_tk")
+    new_token_enc = resp.cookies.get("_m_h5_tk_enc")
+
+    if new_token and new_token_enc:
+        print(f"[令牌更新成功] 新token: {new_token[:32]}")
+        return True
+    print("[!] 令牌获取失败，检查当前Cookie有效性")
+    return False
 
 
 def parse_jsonp(jsonp_str: str):
@@ -106,7 +136,7 @@ def extract_list(parsed: dict):
     返回 (list_data, inner_meta) 二元组
     """
     if not parsed or not isinstance(parsed, dict):
-        return None, None
+        return None
 
     # 打印接口返回信息
     ret_info = parsed.get('ret', [])
@@ -119,7 +149,7 @@ def extract_list(parsed: dict):
     data_wrap = parsed.get('data')
     if data_wrap is None:
         print("[!] 响应缺少 data 字段")
-        return None, None
+        return None
 
     # 淘宝偶尔把 data 序列化成字符串
     if isinstance(data_wrap, str):
@@ -127,10 +157,7 @@ def extract_list(parsed: dict):
             data_wrap = json.loads(data_wrap)
         except json.JSONDecodeError:
             print("[!] data 字段为字符串但无法二次解析为JSON")
-            return None, None
-
-    # 第二层 data  ——  目标 list 在这里
-    inner = data_wrap.get('result', data_wrap)
+            return None
 
     item_list = data_wrap.get('result') if isinstance(data_wrap, dict) else None
 
@@ -146,9 +173,31 @@ def extract_list(parsed: dict):
 
 
 def get_data(page_num: int, page_size: int) -> list:
-    # d.token + "&" + j + "&" + h + "&" + c.data
-    # token = '395d7e4d3668b819925e9fdc22f07d2f'
-    token = cookies['_m_h5_tk'].split('_')[0]
+    # 1. 获取当前 token
+    current_m_h5_tk = session.cookies.get("_m_h5_tk")
+
+    # 2. 【关键修复】判断 token 是否有效
+    # 如果 token 不存在，或者格式不对（不包含下划线），则强制刷新
+    if not current_m_h5_tk or '_' not in current_m_h5_tk:
+        print("[!] 检测到 Token 缺失或无效，正在自动获取...")
+        success = auto_update_token()
+        if not success:
+            raise Exception("无法获取有效的 _m_h5_tk，请检查网络或账号状态")
+
+        # 刷新后再次获取，确保拿到最新值
+        current_m_h5_tk = session.cookies.get("_m_h5_tk")
+
+        # 双重保险：如果刷新后还是 None，直接报错，避免后续 split 崩溃
+        if not current_m_h5_tk:
+            raise Exception("Token 刷新失败，Session 中仍未找到 _m_h5_tk")
+
+    # 3. 安全提取 token 部分
+    try:
+        token = current_m_h5_tk.split('_')[0]
+    except AttributeError:
+        # 理论上上面已经拦截了 None，这里作为兜底
+        raise Exception(f"Token 格式异常: {current_m_h5_tk}")
+
     j = int(time.time() * 1000)
     h = '12574478'
     data_params = {
@@ -167,12 +216,10 @@ def get_data(page_num: int, page_size: int) -> list:
         "params": json.dumps(data_params, separators=(',', ':'))
     }
     data = json.dumps(raw_data, separators=(',', ':'))
-    # data_1 = '{"appId":"30986","params":"{\\"pageNum\\":2,\\"pageSize\\":25,\\"itemLastCount\\":50,\\"latestHundredItem\\":\\"935071146548,784979383182,1075844003512,1069276942279,929629468837,803094764827,1069074239523,984639794053,1041553093736,721732817715,984598735233,840314139055,928750865364,747692967232,1045492810692,1078534137439,1050636498138,664928410758,0,1079861756020,810505644794,1074854561876,952138095293,1082710930547,41294624977,963753441831,1076645039508,993581753148,769079771884,1083932073923,976326040564,952573355082,1014849554431,1077485154445,907827978222,782065080227,681093665849,931559228307,724976325369,17291788029,980989778792,809600268336,815474139424,611067629562,1080417905704,693298018533,1083789752531,788083844609,906546902952,1082086997426\\",\\"firstPagePVID\\":\\"7d11d0b9-b74e-416b-81c1-1fabbc328f10\\",\\"itemTotal\\":\\"900\\",\\"frontAbId\\":\\"427503\\",\\"isFirstPage\\":false,\\"myCna\\":\\"JgeHItTEvQ4BASQIgkDE9RDx\\"}"}'
-    # print(data)
-    # print(data_1)
+
     sign_string = token + "&" + str(j) + "&" + h + "&" + data
     sign = hashlib.md5(sign_string.encode("utf-8")).hexdigest()
-    print(sign)
+    print(f"当前生成sign: {sign}")
 
     url = 'https://h5api.m.taobao.com/h5/mtop.relationrecommend.wirelessrecommend.recommend/2.0/'
 
@@ -193,13 +240,15 @@ def get_data(page_num: int, page_size: int) -> list:
         "data": data,
         "bx-ua": "fast-load"
     }
-    response = requests.get(url, headers=headers, cookies=cookies, params=params)
+    response = session.get(url, params=params)
 
-    # print(response.text)
-    # print(response)
     parsed = parse_jsonp(response.text)
+
+    # 4. 处理业务逻辑中的 Token 过期 (FAIL_SYS_TOKEN_EXPIRED)
+    if parsed and parsed.get('ret') and 'FAIL_SYS_TOKEN_EXPIRED' in str(parsed['ret'][0]):
+        print("[!] 检测到令牌过期，正在自动续期并重试请求")
+        auto_update_token()
+        return get_data(page_num, page_size)
+
     list_data = extract_list(parsed)
     return list_data
-
-
-# print(get_data(1, 25))
