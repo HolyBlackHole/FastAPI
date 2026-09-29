@@ -90,7 +90,7 @@ def auto_update_token():
 def parse_jsonp(jsonp_str: str):
     """
     解析淘宝MTOP接口的JSONP响应。
-    典型格式: mtopjsonppcrecommend24({api: "...", data: {...}, ret: [...]})
+    典型格式: mtopjsonppcrecommend24({services: "...", data: {...}, ret: [...]})
     注意: 响应中的JS对象键名通常没有双引号，需要转换为标准JSON后再解析。
     """
     if not jsonp_str:
@@ -140,7 +140,7 @@ def extract_list(parsed: dict):
 
     # 打印接口返回信息
     ret_info = parsed.get('ret', [])
-    api_name = parsed.get('api', '')
+    api_name = parsed.get('services', '')
     if ret_info:
         print(f"    接口: {api_name}")
         print(f"    返回: {ret_info[0] if isinstance(ret_info, list) else ret_info}")
@@ -234,7 +234,7 @@ def get_data(page_num: int, page_size: int) -> list:
         "valueType": "original",
         "jsonpIncPrefix": "pcrecommend",
         "ttid": "1@tbwang_windows_1.0.0#pc",
-        "api": "mtop.relationrecommend.WirelessRecommend.recommend",
+        "services": "mtop.relationrecommend.WirelessRecommend.recommend",
         "type": "originaljsonp",
         "callback": "mtopjsonppcrecommend25",
         "data": data,

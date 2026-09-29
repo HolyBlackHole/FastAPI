@@ -28,7 +28,7 @@ from playwright.async_api import async_playwright
 def parse_jsonp(jsonp_str: str):
     """
     解析淘宝MTOP接口的JSONP响应。
-    典型格式: mtopjsonppcrecommend24({api: "...", data: {...}, ret: [...]})
+    典型格式: mtopjsonppcrecommend24({services: "...", data: {...}, ret: [...]})
     注意: 响应中的JS对象键名通常没有双引号，需要转换为标准JSON后再解析。
     """
     if not jsonp_str:
@@ -78,7 +78,7 @@ def extract_list(parsed: dict):
 
     # 打印接口返回信息
     ret_info = parsed.get('ret', [])
-    api_name = parsed.get('api', '')
+    api_name = parsed.get('services', '')
     if ret_info:
         print(f"    接口: {api_name}")
         print(f"    返回: {ret_info[0] if isinstance(ret_info, list) else ret_info}")
